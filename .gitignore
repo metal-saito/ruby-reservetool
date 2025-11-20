@@ -1,9 +1,3 @@
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-
 # Ruby
 *.gem
 *.rbc
@@ -43,16 +37,5 @@ public/uploads/tmp
 *.tmp
 
 # 共通
-logs/
-dist/
-build/
-*.spec
-reservation_tool/RELEASE/
-reservation_tool/RELEASE/**
-*.exe
-*.dll
-*.pak
-*.bin
-*.dat
 .DS_Store
 Thumbs.db
