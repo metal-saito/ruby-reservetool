@@ -1,0 +1,43 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "optparse"
+
+ROOT = File.expand_path("..", __dir__)
+$LOAD_PATH.unshift(File.join(ROOT, "lib"))
+
+require "reservation_tool/scheduler"
+require "reservation_tool/jobs/integrity_monitor"
+require "reservation_tool/jobs/json_source"
+require "reservation_tool/metrics/collector"
+require "reservation_tool/notifiers/stdout_notifier"
+
+options = { ticks: nil, interval: 10 }
+OptionParser.new do |opt|
+  opt.banner = "Usage: run_monitor [options]"
+  opt.on("--ticks N", Integer, "Tick 回数を指定 (省略時は常駐)") { |v| options[:ticks] = v }
+  opt.on("--interval SECONDS", Integer, "ジョブ実行間隔 (秒)") { |v| options[:interval] = v }
+end.parse!
+
+data_path = File.join(ROOT, "data", "reservations.json")
+source = ReservationTool::Jobs::JSONSource.new(path: data_path)
+metrics = ReservationTool::Metrics::Collector.new
+notifier = ReservationTool::Notifiers::StdoutNotifier.new
+monitor = ReservationTool::Jobs::IntegrityMonitor.new(
+  source: source,
+  notifier: notifier,
+  metrics: metrics
+)
+
+scheduler = ReservationTool::Scheduler.new
+scheduler.every(options[:interval], name: "IntegrityMonitor", retry_backoff: 5) do
+  monitor.call
+  puts("[Metrics] #{metrics.to_h}")
+end
+
+if options[:ticks]
+  options[:ticks].times { scheduler.tick }
+else
+  scheduler.run
+end
+

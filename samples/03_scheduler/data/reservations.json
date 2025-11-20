@@ -1,0 +1,31 @@
+[
+  {
+    "id": "RES-0001",
+    "resource_name": "Studio-A",
+    "starts_at": "2025-01-02T09:00:00+09:00",
+    "ends_at": "2025-01-02T10:00:00+09:00",
+    "status": "booked"
+  },
+  {
+    "id": "RES-0002",
+    "resource_name": "Studio-A",
+    "starts_at": "2025-01-02T09:30:00+09:00",
+    "ends_at": "2025-01-02T11:00:00+09:00",
+    "status": "booked"
+  },
+  {
+    "id": "RES-0003",
+    "resource_name": "Studio-B",
+    "starts_at": "2025-01-02T15:00:00+09:00",
+    "ends_at": "2025-01-02T14:00:00+09:00",
+    "status": "booked"
+  },
+  {
+    "id": "RES-0004",
+    "resource_name": "Studio-C",
+    "starts_at": "2024-12-31T08:00:00+09:00",
+    "ends_at": "2024-12-31T09:00:00+09:00",
+    "status": "booked"
+  }
+]
+
