@@ -1,103 +1,98 @@
 # frozen_string_literal: true
 
-require "optparse"
-require "time"
-
 require_relative "reservation"
 require_relative "store"
+require_relative "cli/reservation_formatter"
+require_relative "cli/commands/add"
+require_relative "cli/commands/cancel"
+require_relative "cli/commands/help"
+require_relative "cli/commands/list"
 
 module ReservationTool
+  # CLI provides a small command execution framework that can be extended by
+  # registering additional command objects. Commands are responsible for their
+  # own argument parsing and output, which keeps the dispatcher compact and
+  # easier to customize.
   class CLI
-    def initialize(io: $stdout, store: Store.new)
+    DEFAULT_COMMAND_FACTORY = lambda {
+      [
+        CLI::Commands::Add.new,
+        CLI::Commands::List.new,
+        CLI::Commands::Cancel.new
+      ]
+    }.freeze
+
+    def initialize(io: $stdout, store: Store.new, commands: nil)
       @io = io
       @store = store
+      command_set = commands || DEFAULT_COMMAND_FACTORY.call
+      @commands = build_command_registry(command_set)
+      @help_command = CLI::Commands::Help.new(@commands.values)
+      register_help_aliases
     end
 
+    # Executes the CLI with the given argv array. Unknown commands fall back to
+    # the help output so that users always receive guidance.
     def run(argv)
-      command = argv.shift
-      case command
-      when "add" then add(argv)
-      when "list" then list
-      when "cancel" then cancel(argv)
-      else
-        io.puts usage
-      end
+      arguments = Array(argv).dup
+      name = extract_command_name(arguments)
+      command = resolve_command(name)
+      command.call(argv: arguments, io: io, store: store)
     rescue Reservation::ValidationError => e
       io.puts "Validation error: #{e.message}"
     rescue Store::ConflictError => e
       io.puts "Conflict error: #{e.message}"
     end
 
+    # Exposes the computed usage text so it can be surfaced by integrations or
+    # tests without invoking the help command directly.
+    def usage
+      help_command.usage_text
+    end
+
     private
 
-    attr_reader :io, :store
+    attr_reader :io, :store, :commands, :help_command
 
-    def add(argv)
-      params = parse_add_options(argv)
-      reservation = Reservation.build(**params)
-      stored = store.add(reservation)
-      io.puts "予約を登録しました: #{stored.id}"
-    end
-
-    def list
-      records = store.all.sort_by(&:starts_at)
-      if records.empty?
-        io.puts "予約はまだありません。"
-        return
-      end
-
-      io.puts "ID       | 利用者 | リソース | 開始                     | 終了"
-      records.each do |r|
-        io.puts format(
-          "%-8s | %-6s | %-8s | %-24s | %-24s",
-          r.id,
-          r.user_name,
-          r.resource_name,
-          r.starts_at,
-          r.ends_at
-        )
+    def build_command_registry(command_set)
+      case command_set
+      when Hash
+        command_set.each_with_object({}) do |(name, command), registry|
+          register_command(registry, name.to_s, command)
+        end
+      else
+        Array(command_set).each_with_object({}) do |command, registry|
+          register_command(registry, command.name.to_s, command)
+        end
       end
     end
 
-    def cancel(argv)
-      id = argv.first
-      unless id
-        io.puts "usage: reserve cancel ID"
-        return
-      end
-
-      store.cancel(id)
-      io.puts "予約をキャンセルしました: #{id}"
-    rescue Store::NotFoundError
-      io.puts "指定 ID の予約は存在しません: #{id}"
+    def extract_command_name(arguments)
+      arguments.shift.to_s.strip
     end
 
-    def parse_add_options(argv)
-      options = {}
-      parser = OptionParser.new do |opt|
-        opt.banner = "usage: reserve add --name NAME --resource RESOURCE --starts-at ISO8601 --ends-at ISO8601"
-        opt.on("--name NAME", "利用者名") { |v| options[:user_name] = v }
-        opt.on("--resource RESOURCE", "リソース名") { |v| options[:resource_name] = v }
-        opt.on("--starts-at TIME", "開始時刻 (ISO8601)") { |v| options[:starts_at] = Time.parse(v) }
-        opt.on("--ends-at TIME", "終了時刻 (ISO8601)") { |v| options[:ends_at] = Time.parse(v) }
-      end
+    def resolve_command(name)
+      return help_command if name.empty?
 
-      parser.parse!(argv)
-      options
-    rescue OptionParser::ParseError => e
-      io.puts e.message
-      io.puts parser
-      raise Reservation::ValidationError, "引数エラー"
+      commands.fetch(name) { help_command }
     end
 
-    def usage
-      <<~TEXT
-        usage:
-          reserve add --name NAME --resource RESOURCE --starts-at ISO8601 --ends-at ISO8601
-          reserve list
-          reserve cancel ID
-      TEXT
+    def register_help_aliases
+      help_command.aliases.each do |alias_name|
+        commands[alias_name] = help_command
+      end
+    end
+
+    def register_command(registry, name, command)
+      registry[name] = command
+      return registry unless command.respond_to?(:aliases)
+
+      command.aliases.each do |alias_name|
+        next if alias_name.to_s == name
+
+        registry[alias_name.to_s] = command
+      end
+      registry
     end
   end
 end
-

@@ -4,6 +4,8 @@ require "securerandom"
 require "time"
 
 module ReservationTool
+  # Reservation models a single booking and encapsulates validation rules for
+  # time windows and resource usage.
   class Reservation
     ValidationError = Class.new(StandardError)
 
