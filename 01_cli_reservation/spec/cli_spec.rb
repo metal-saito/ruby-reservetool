@@ -63,5 +63,47 @@ RSpec.describe ReservationTool::CLI do
     expect(io.string).to include("予約をキャンセルしました: RES-9000")
     expect(store.all).to be_empty
   end
-end
 
+  it "allows registering custom commands via configuration" do
+    custom_command = Class.new do
+      attr_reader :name, :signature, :description
+
+      def initialize
+        @name = "greet"
+        @signature = "greet"
+        @description = "追加のカスタムコマンドを実行します"
+      end
+
+      def aliases
+        []
+      end
+
+      def call(argv:, io:, store:, **)
+        io.puts("Hello from custom command!")
+      end
+    end.new
+
+    configured_cli = described_class.new(io: io, store: store) do |config|
+      config.register_command(custom_command)
+    end
+
+    configured_cli.run(["greet"])
+
+    io.rewind
+    expect(io.string).to include("Hello from custom command!")
+  end
+
+  it "supports overriding default error presentation" do
+    configured_cli = described_class.new(io: io, store: store) do |config|
+      config.on_error(
+        ReservationTool::Reservation::ValidationError,
+        message: "カスタムエラー: %{message}"
+      )
+    end
+
+    configured_cli.run(["add"])
+
+    io.rewind
+    expect(io.string).to include("カスタムエラー: 引数エラー")
+  end
+end

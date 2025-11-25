@@ -24,6 +24,12 @@ module ReservationTool
           lines = @commands.map { |command| "  reserve #{command.signature}" }
           (['usage:'] + lines).join("\n") + "\n"
         end
+
+        # Allows the command catalogue to be refreshed after the help command is
+        # registered with additional aliases or dynamic commands.
+        def update_commands(commands)
+          @commands = Array(commands)
+        end
       end
     end
   end
