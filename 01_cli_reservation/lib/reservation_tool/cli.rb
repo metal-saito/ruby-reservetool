@@ -2,6 +2,9 @@
 
 require_relative "reservation"
 require_relative "store"
+require_relative "cli/command_registry"
+require_relative "cli/configuration"
+require_relative "cli/error_presenter"
 require_relative "cli/reservation_formatter"
 require_relative "cli/commands/add"
 require_relative "cli/commands/cancel"
@@ -9,90 +12,71 @@ require_relative "cli/commands/help"
 require_relative "cli/commands/list"
 
 module ReservationTool
-  # CLI provides a small command execution framework that can be extended by
-  # registering additional command objects. Commands are responsible for their
-  # own argument parsing and output, which keeps the dispatcher compact and
-  # easier to customize.
+  # CLI now wraps command registration, error handling, and dispatching inside a
+  # configurable pipeline. Consumers can add new commands, override existing
+  # ones, and customise error responses without changing the dispatcher itself.
   class CLI
-    DEFAULT_COMMAND_FACTORY = lambda {
-      [
-        CLI::Commands::Add.new,
-        CLI::Commands::List.new,
-        CLI::Commands::Cancel.new
-      ]
-    }.freeze
+    def initialize(io: $stdout, store: Store.new, commands: nil, configuration: nil, &block)
+      @configuration = configuration || CLI::Configuration.new
+      @configuration.io = io
+      @configuration.store = store
 
-    def initialize(io: $stdout, store: Store.new, commands: nil)
-      @io = io
-      @store = store
-      command_set = commands || DEFAULT_COMMAND_FACTORY.call
-      @commands = build_command_registry(command_set)
-      @help_command = CLI::Commands::Help.new(@commands.values)
-      register_help_aliases
+      register_initial_commands(commands)
+      ensure_default_commands(commands)
+
+      yield @configuration if block_given?
+
+      finalize_configuration!
     end
 
-    # Executes the CLI with the given argv array. Unknown commands fall back to
-    # the help output so that users always receive guidance.
     def run(argv)
       arguments = Array(argv).dup
       name = extract_command_name(arguments)
-      command = resolve_command(name)
+      command = registry.fetch(name) { help_command }
       command.call(argv: arguments, io: io, store: store)
-    rescue Reservation::ValidationError => e
-      io.puts "Validation error: #{e.message}"
-    rescue Store::ConflictError => e
-      io.puts "Conflict error: #{e.message}"
+    rescue StandardError => error
+      handled = error_presenter.present(error)
+      raise unless handled
     end
 
-    # Exposes the computed usage text so it can be surfaced by integrations or
-    # tests without invoking the help command directly.
     def usage
       help_command.usage_text
     end
 
     private
 
-    attr_reader :io, :store, :commands, :help_command
+    attr_reader :configuration, :registry, :help_command, :error_presenter
+    attr_accessor :io, :store
 
-    def build_command_registry(command_set)
-      case command_set
+    def finalize_configuration!
+      built = configuration.build
+      self.io = built.io
+      self.store = built.store
+      @registry = built.registry
+      @help_command = built.help_command
+      @error_presenter = built.error_presenter
+    end
+
+    def register_initial_commands(commands)
+      return unless commands
+
+      case commands
       when Hash
-        command_set.each_with_object({}) do |(name, command), registry|
-          register_command(registry, name.to_s, command)
-        end
+        commands.each { |name, command| configuration.register_command(command, as: name) }
       else
-        Array(command_set).each_with_object({}) do |command, registry|
-          register_command(registry, command.name.to_s, command)
-        end
+        Array(commands).each { |command| configuration.register_command(command) }
       end
+    end
+
+    def ensure_default_commands(commands)
+      return unless commands.nil?
+      return unless configuration.empty?
+
+      configuration.register_default_commands
     end
 
     def extract_command_name(arguments)
       arguments.shift.to_s.strip
-    end
-
-    def resolve_command(name)
-      return help_command if name.empty?
-
-      commands.fetch(name) { help_command }
-    end
-
-    def register_help_aliases
-      help_command.aliases.each do |alias_name|
-        commands[alias_name] = help_command
-      end
-    end
-
-    def register_command(registry, name, command)
-      registry[name] = command
-      return registry unless command.respond_to?(:aliases)
-
-      command.aliases.each do |alias_name|
-        next if alias_name.to_s == name
-
-        registry[alias_name.to_s] = command
-      end
-      registry
     end
   end
 end
